@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Vocabdeck Cards</title>
+  <meta name="theme-color" content="#f7f8f9">
+  <meta name="description" content="German nouns and verbs as swipe cards, with articles and colours.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <script>
+    (function () { var t; try { t = localStorage.getItem('vocabdeck.theme'); } catch (e) {}
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; })();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
