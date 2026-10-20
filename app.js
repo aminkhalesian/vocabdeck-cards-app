@@ -367,12 +367,13 @@
     document.querySelectorAll('.face .word, .qcard .word').forEach((el) => {
       el.style.fontSize = ''; el.style.overflowWrap = '';
       let sz = parseFloat(getComputedStyle(el).fontSize);
-      while (el.scrollWidth > el.clientWidth + 1 && sz > 22) { sz -= 1; el.style.fontSize = sz + 'px'; }
-      if (el.scrollWidth > el.clientWidth + 1) el.style.overflowWrap = 'anywhere';
+      const over = () => el.scrollWidth > el.clientWidth;
+      while (over() && sz > 16) { sz -= 1; el.style.fontSize = sz + 'px'; }
+      if (over()) el.style.overflowWrap = 'anywhere';
     });
   }
   new MutationObserver(() => requestAnimationFrame(fitWords)).observe(document.body, { childList: true, subtree: true });
-  addEventListener('resize', fitWords);
+  addEventListener('resize', fitWords); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitWords);
   function isDark() { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
   function toggleTheme() { setTheme(isDark() ? 'light' : 'dark'); const b = document.querySelector('.top .iconbtn'); if (b) b.replaceChildren(svg(isDark() ? ICON.sun : ICON.moon)); }
   function setTheme(t) { try { t === 'system' ? localStorage.removeItem(KEY_THEME) : localStorage.setItem(KEY_THEME, t); } catch (e) {} t === 'system' ? delete document.documentElement.dataset.theme : (document.documentElement.dataset.theme = t); const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = getComputedStyle(document.body).backgroundColor; }

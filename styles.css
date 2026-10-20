@@ -170,3 +170,5 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / .45); }
 .face .word { font-size: clamp(32px, calc(11vw - 2px), 46px); }
 .face .sent:not(.en) { font-size: 17px; }
 .face .word, .qcard .word { overflow-wrap: normal; word-break: normal; }
+.fmain { grid-template-columns: minmax(0, 1fr); } .face .word, .qcard .word { min-width: 0; max-width: 100%; }
+.qcard { grid-template-columns: minmax(0, 1fr); }
