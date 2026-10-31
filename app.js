@@ -3,7 +3,7 @@
 (() => {
   'use strict';
   const LV = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-  const APP_V = '1.7';
+  const APP_V = '1.8';
   const CATS = [['noun', 'Nouns'], ['verb', 'Verbs'], ['adjective', 'Adjectives'], ['adverb', 'Adverbs'], ['other', 'Other']];
   const ART = { m: 'der', f: 'die', n: 'das', p: 'die' };
   const GCLS = { m: 'g-m', f: 'g-f', n: 'g-n', p: 'g-f' };
@@ -39,10 +39,34 @@
   };
 
   /* ---------- progress (localStorage) ---------- */
-  const defaults = () => ({ v: 1, st: {}, deck: null, hist: [], quiz: { n: 0, ok: 0 }, prefs: { level: 'B1', size: 24, types: ['noun', 'verb', 'adjective', 'adverb', 'other'], order: 'freq' } });
+  const defaults = () => ({ v: 1, st: {}, sr: {}, deck: null, hist: [], quiz: { n: 0, ok: 0 }, prefs: { level: 'B1', size: 24, types: ['noun', 'verb', 'adjective', 'adverb', 'other'], order: 'freq', cap: 60 } });
   let P;
-  try { P = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY_P) || '{}')); P.prefs = Object.assign(defaults().prefs, P.prefs); P.quiz = Object.assign({ n: 0, ok: 0 }, P.quiz); } catch (e) { P = defaults(); }
+  try { P = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY_P) || '{}')); P.prefs = Object.assign(defaults().prefs, P.prefs); P.quiz = Object.assign({ n: 0, ok: 0 }, P.quiz); if (!P.sr || typeof P.sr !== 'object') P.sr = {}; } catch (e) { P = defaults(); }
+  /* ---------- spaced repetition (Leitner boxes) ---------- */
+  const INT = { 1: 1, 2: 3, 3: 7, 4: 14, 5: 30 }; /* days until the word is due again, per box */
+  const DONE = 99999;
+  const today = () => { const d = new Date(); return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5); };
+  const stOf = (b) => (b >= 3 ? 'k' : 'r');
+  function migrate() {
+    if (P.srInit) return;
+    const t = today(); let i = 0;
+    Object.keys(P.st).forEach((id) => {
+      if (P.sr[id]) return;
+      if (P.st[id] === 'r') P.sr[id] = { b: 1, d: t };
+      else if (P.st[id] === 'k') P.sr[id] = { b: 3, d: t + 7 + (i++ % 14) };
+    });
+    P.srInit = 1;
+  }
+  function schedule(id, res, first) {
+    const cur = P.sr[id], t = today(); let b;
+    if (first || !cur) b = res === 'k' ? 3 : 1;
+    else b = res === 'k' ? cur.b + 1 : 1;
+    if (b > 5) { P.sr[id] = { b: 6, d: DONE }; P.st[id] = 'k'; return; }
+    P.sr[id] = { b, d: t + INT[b] }; P.st[id] = stOf(b);
+  }
+  const dueIds = () => { const t = today(); return Object.keys(P.sr).filter((k) => P.sr[k].b <= 5 && P.sr[k].d <= t && BYID.has(+k)).sort((a, b) => P.sr[a].d - P.sr[b].d).map(Number); };
   const save = () => { try { localStorage.setItem(KEY_P, JSON.stringify(P)); } catch (e) { toast('Could not save progress: storage is full or blocked.'); } };
+  migrate(); save();
 
   /* ---------- vocabulary (IndexedDB) ---------- */
   let WORDS = [], BYID = new Map();
@@ -122,7 +146,7 @@
       main, nav);
   }
   function updateBadge() { const b = $('nav.tabs [data-tab=review]'); if (!b) return; let bd = $('.badge', b); const n = reviewCount(); if (!n) { bd && bd.remove(); return; } if (!bd) { bd = h('span', { class: 'badge' }); b.append(bd); } bd.textContent = String(Math.min(n, 999)); }
-  const reviewCount = () => Object.values(P.st).filter((v) => v === 'r').length;
+  const reviewCount = () => dueIds().length;
   function go(tab) { S.tab = tab; S.sess = null; S.mode = null; if (tab !== 'quiz') S.quiz = null; speechSynthesis && speechSynthesis.cancel(); render(); }
   function render() {
     shell();
@@ -189,7 +213,7 @@
   /* ---------- card session (deck + review) ---------- */
   function startSession(mode) {
     const ids = mode === 'deck' ? P.deck.ids : S.mode.ids;
-    S.sess = { mode, ids, i: mode === 'deck' ? P.deck.pos : 0, log: [], k: 0, r: 0, flipped: false };
+    S.sess = { mode, ids, n0: ids.length, again: new Set(), i: mode === 'deck' ? P.deck.pos : 0, log: [], k: 0, r: 0, flipped: false };
     drawSession();
   }
   const finishedDeckStats = () => { const d = P.deck; return { known: d.ids.filter((i) => P.st[i] === 'k').length, review: d.ids.filter((i) => P.st[i] === 'r').length }; };
@@ -246,26 +270,33 @@
   }
   document.addEventListener('keydown', (e) => { if (S.sess && S.sess.keys && !document.querySelector('dialog[open]')) S.sess.keys(e); });
   function answer(w, res) {
-    const s = S.sess; s.log.push({ id: w.id, prev: P.st[w.id], i: s.i });
-    P.st[w.id] = res; res === 'k' ? s.k++ : s.r++;
+    const s = S.sess, second = s.mode === 'review' && s.again.has(w.id);
+    s.log.push({ id: w.id, prev: P.st[w.id], prevSr: P.sr[w.id] ? { ...P.sr[w.id] } : null, i: s.i, res, second, pushed: false });
+    if (!second) {
+      schedule(w.id, res, s.mode === 'deck'); res === 'k' ? s.k++ : s.r++;
+      if (s.mode === 'review' && res === 'r') { s.ids.push(w.id); s.again.add(w.id); s.log[s.log.length - 1].pushed = true; }
+    }
     s.i++; if (s.mode === 'deck') { P.deck.pos = s.i; if (s.i >= s.ids.length) completeDeck(); } save(); updateBadge(); drawSession();
   }
   function completeDeck() { const d = P.deck; d.done = true; const f = finishedDeckStats(); P.hist.unshift({ id: d.id, ts: Date.now(), level: d.level, n: d.ids.length, known: f.known, review: f.review }); P.hist = P.hist.slice(0, 60); }
   function undo() {
     const s = S.sess, l = s.log.pop(); if (!l) return;
     if (l.prev) P.st[l.id] = l.prev; else delete P.st[l.id];
+    if (l.prevSr) P.sr[l.id] = l.prevSr; else delete P.sr[l.id];
+    if (l.pushed) { s.ids.pop(); s.again.delete(l.id); }
+    if (!l.second) l.res === 'k' ? s.k-- : s.r--;
     s.i = l.i; if (s.mode === 'deck') { P.deck.done = false; P.deck.pos = s.i; if (P.hist[0] && P.hist[0].id === P.deck.id) P.hist.shift(); }
     save(); drawSession();
   }
   function drawDone() {
     const s = S.sess; main.className = '';
-    const total = s.ids.length, pctK = total ? s.k / total : 0;
+    const total = s.n0, pctK = total ? s.k / total : 0;
     const again = s.mode === 'deck' ? h('button', { class: 'btn block', type: 'button', onclick: () => { S.sess = null; P.deck = null; save(); render(); } }, 'Make a new deck')
       : h('button', { class: 'btn block', type: 'button', onclick: () => go('review') }, 'Back to Review');
     main.replaceChildren(h('div', { class: 'done' },
       h('div', { class: 'ring', style: `--p:${Math.round(pctK * 360)}deg` }), h('div', { class: 'big' }, `${s.k} of ${total}`),
       h('p', { class: 'lead', style: 'margin:0' }, s.mode === 'deck' ? 'Deck finished.' : 'Review finished.'),
-      h('div', { class: 'stats3' }, h('div', {}, h('b', {}, String(s.k)), h('span', {}, 'known')), h('div', {}, h('b', {}, String(s.r)), h('span', {}, 'to review')), h('div', {}, h('b', {}, String(reviewCount())), h('span', {}, 'in review tab'))),
+      h('div', { class: 'stats3' }, h('div', {}, h('b', {}, String(s.k)), h('span', {}, s.mode === 'review' ? 'remembered' : 'known')), h('div', {}, h('b', {}, String(s.r)), h('span', {}, s.mode === 'review' ? 'forgotten' : 'to review')), h('div', {}, h('b', {}, String(reviewCount())), h('span', {}, 'still due today'))),
       again, s.r && s.mode === 'deck' ? h('button', { class: 'btn ghost block', type: 'button', onclick: () => { S.sess = null; go('review'); } }, 'Go to Review') : ''));
     updateBadge();
   }
@@ -281,14 +312,32 @@
   /* ---------- Review tab ---------- */
   function viewReview() {
     main.className = '';
-    const ids = Object.keys(P.st).filter((k) => P.st[k] === 'r').map(Number).filter((i) => BYID.has(i));
-    if (!ids.length) return main.replaceChildren(h('h1', {}, 'Review'), h('p', { class: 'lead' }, 'Words you swipe left on collect here. Nothing to review right now.'), h('button', { class: 'btn ghost block', type: 'button', onclick: () => go('deck') }, 'Go to deck'));
-    const words = ids.map((i) => BYID.get(i));
-    const start = h('button', { class: 'btn block', type: 'button', onclick: () => { S.mode = { ids: shuffle(ids) }; startSession('review'); } }, `Review ${ids.length} word${ids.length > 1 ? 's' : ''}`);
-    const show = words.slice(0, 150);
-    main.replaceChildren(h('h1', {}, 'Review'), h('p', { class: 'lead' }, 'Swipe right when you know a word and it leaves this list.'), start,
-      h('h2', {}, 'Your list'), h('ul', { class: 'wlist' }, show.map((w) => h('li', { class: gcls(w) }, h('span', { class: 'w' }, wordLine(w)), h('span', { class: 'e' }, firstSense(w))))),
-      words.length > show.length ? h('p', { class: 'muted small center' }, `+ ${words.length - show.length} more`) : '');
+    const t = today(), due = dueIds(), cap = P.prefs.cap || 60, todayIds = due.slice(0, cap);
+    const all = Object.keys(P.sr).filter((k) => BYID.has(+k)), live = all.filter((k) => P.sr[k].b <= 5);
+    const boxN = (n) => live.filter((k) => P.sr[k].b === n).length, mastered = all.length - live.length;
+    const tomorrow = live.filter((k) => P.sr[k].d === t + 1).length, week = live.filter((k) => P.sr[k].d > t && P.sr[k].d <= t + 7).length;
+    const capSeg = h('div', { class: 'seg' }, [[30, '30'], [60, '60'], [90, '90']].map(([v, l]) => h('button', { type: 'button', 'aria-pressed': cap === v, onclick: () => { P.prefs.cap = v; save(); viewReview(); } }, l)));
+    const parts = [h('h1', {}, 'Review')];
+    if (!all.length) {
+      return main.replaceChildren(...parts, h('p', { class: 'lead' }, 'Every word you answer in a deck joins a schedule, and it comes back here when it is due. Nothing yet.'), h('button', { class: 'btn ghost block', type: 'button', onclick: () => go('deck') }, 'Go to deck'));
+    }
+    if (todayIds.length) {
+      parts.push(h('p', { class: 'lead' }, `${fmt(due.length)} due today${due.length > cap ? `, ${fmt(cap)} in this round` : ''}. Right = you remembered it, it comes back later. Left = it returns tomorrow, and once more today.`),
+        h('button', { class: 'btn block', type: 'button', onclick: () => { S.mode = { ids: shuffle(todayIds) }; startSession('review'); } }, `Start review (${todayIds.length} word${todayIds.length > 1 ? 's' : ''})`));
+    } else {
+      parts.push(h('p', { class: 'lead' }, `All done for today. ${tomorrow ? `${fmt(tomorrow)} word${tomorrow > 1 ? 's' : ''} come back tomorrow.` : week ? `${fmt(week)} come back within a week.` : 'Nothing is scheduled soon.'}`),
+        h('button', { class: 'btn ghost block', type: 'button', onclick: () => go('deck') }, 'Learn new words'));
+    }
+    const row = (l, n) => h('div', { class: 'row small', style: 'padding:4px 0' }, h('span', {}, l), h('b', {}, fmt(n)));
+    parts.push(h('h2', {}, 'Your boxes'),
+      h('div', { class: 'panel' }, row('Box 1 · back in 1 day', boxN(1)), row('Box 2 · 3 days', boxN(2)), row('Box 3 · 7 days', boxN(3)), row('Box 4 · 14 days', boxN(4)), row('Box 5 · 30 days', boxN(5)), row('Learned (passed box 5)', mastered)),
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Max words per round'), capSeg));
+    if (todayIds.length) {
+      const show = todayIds.slice(0, 100).map((i) => BYID.get(i));
+      parts.push(h('h2', {}, 'Due now'), h('ul', { class: 'wlist' }, show.map((w) => h('li', { class: gcls(w) }, h('span', { class: 'w' }, wordLine(w)), h('span', { class: 'e' }, firstSense(w))))),
+        todayIds.length > show.length ? h('p', { class: 'muted small center' }, `+ ${todayIds.length - show.length} more`) : '');
+    }
+    main.replaceChildren(...parts);
   }
 
   /* ---------- Quiz tab ---------- */
@@ -328,7 +377,7 @@
       : h('div', { class: `qcard ${gcls(w)}` }, h('span', { class: 'sub' }, 'What does it mean?'), h('div', { class: 'word' }, wordLine(w)), h('button', { class: 'speak', type: 'button', style: 'justify-self:center;margin-top:6px', 'aria-label': 'Listen', onclick: () => say([spoken(w)]) }, svg(ICON.sound)));
     cur.opts.forEach((o) => opts.append(h('button', { class: 'opt', type: 'button', onclick: (e) => {
       if (q.answered) return; q.answered = true; const good = o === cur.a; q.ok += good ? 1 : 0; P.quiz.n++; P.quiz.ok += good ? 1 : 0;
-      if (!good) { q.wrong.push(w); P.st[w.id] = 'r'; }
+      if (!good) { q.wrong.push(w); P.st[w.id] = 'r'; P.sr[w.id] = { b: 1, d: today() + 1 }; }
       opts.querySelectorAll('button').forEach((b) => { if (b.textContent === cur.a) b.classList.add('right'); });
       if (!good) e.currentTarget.classList.add('wrong');
       if (cur.t === 'art') { const bl = card.querySelector('[data-blank]'); bl.textContent = cur.a; }
@@ -398,7 +447,7 @@
       catch (e) { msg.textContent = (navigator.onLine ? '' : 'Offline. ') + e.message; } finally { upd.disabled = false; wrap.hidden = true; }
     } }, 'Update words from Supabase');
     const file = h('input', { type: 'file', accept: 'application/json', hidden: true, onchange: async () => {
-      try { const j = JSON.parse(await file.files[0].text()); if (!j || j.v !== 1 || typeof j.st !== 'object') throw 0; P = Object.assign(defaults(), j); save(); dlg.close(); toast('Progress restored.'); render(); } catch (e) { toast('That file is not a Vocabdeck backup.'); } } });
+      try { const j = JSON.parse(await file.files[0].text()); if (!j || j.v !== 1 || typeof j.st !== 'object') throw 0; P = Object.assign(defaults(), j); P.prefs = Object.assign(defaults().prefs, P.prefs); if (!P.sr) P.sr = {}; migrate(); save(); dlg.close(); toast('Progress restored.'); render(); } catch (e) { toast('That file is not a Vocabdeck backup.'); } } });
     const reset = h('button', { class: 'btn danger block', type: 'button', onclick: () => { if (reset.dataset.arm) { P = defaults(); save(); dlg.close(); S.sess = null; S.quiz = null; toast('Progress reset.'); render(); } else { reset.dataset.arm = 1; reset.textContent = 'Tap again to erase all progress'; } } }, 'Reset progress');
     dlg.append(h('div', { class: 'sheet-in' }, h('h3', {}, 'Settings'),
       h('div', { class: 'sec' }, h('span', { class: 'lbl muted small' }, 'Appearance'), themeSeg),
@@ -417,7 +466,7 @@
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     try { await loadWords(); } catch (e) { WORDS = []; }
     if (P.deck && !P.deck.done && !WORDS.length) P.deck = null;
-    render();
+    render(); updateBadge();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   })();
 })();
