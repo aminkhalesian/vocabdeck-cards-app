@@ -3,6 +3,7 @@
 (() => {
   'use strict';
   const LV = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+  const APP_V = '1.7';
   const CATS = [['noun', 'Nouns'], ['verb', 'Verbs'], ['adjective', 'Adjectives'], ['adverb', 'Adverbs'], ['other', 'Other']];
   const ART = { m: 'der', f: 'die', n: 'das', p: 'die' };
   const GCLS = { m: 'g-m', f: 'g-f', n: 'g-n', p: 'g-f' };
@@ -179,6 +180,7 @@
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Word types'), chips),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Order'), ord),
       stats, go1,
+      h('p', { class: 'muted small center', style: 'margin-top:10px' }, `App version ${APP_V}`),
       last ? h('p', { class: 'muted small center', style: 'margin-top:16px' }, `Last deck: ${last.level}, ${last.n} words, ${last.known} known, ${last.review} to review.`) : '',
       h('div', { class: 'legend', style: 'justify-content:center;margin-top:18px' }, h('span', {}, h('i', { style: 'background:var(--m)' }), 'der'), h('span', {}, h('i', { style: 'background:var(--f)' }), 'die'), h('span', {}, h('i', { style: 'background:var(--n)' }), 'das'), h('span', {}, h('i', { style: 'background:var(--o)' }), 'other')));
     refresh();
@@ -404,6 +406,7 @@
       h('div', { class: 'sec' }, h('span', { class: 'lbl muted small' }, 'Backup'), h('p', { class: 'muted small', style: 'margin:0' }, 'Progress is kept on this phone. A backup file protects it if you clear browser data or change phones.'),
         h('button', { class: 'btn ghost block', type: 'button', onclick: () => { const b = new Blob([JSON.stringify(P)], { type: 'application/json' }); const a = h('a', { href: URL.createObjectURL(b), download: `vocabdeck-progress-${new Date().toISOString().slice(0, 10)}.json` }); document.body.append(a); a.click(); a.remove(); } }, 'Export backup'),
         h('button', { class: 'btn ghost block', type: 'button', onclick: () => file.click() }, 'Restore from backup'), file),
+      h('div', { class: 'sec' }, h('span', { class: 'lbl muted small' }, `App version ${APP_V}`), h('button', { class: 'btn ghost block', type: 'button', onclick: async () => { try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map((r) => r.unregister())); const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) {} location.reload(); } }, 'Reload app (clear cache)')),
       h('div', { class: 'sec' }, reset),
       h('button', { class: 'btn block', type: 'button', onclick: () => dlg.close() }, 'Done')));
     dlg.addEventListener('close', () => dlg.remove()); document.body.append(dlg); dlg.showModal();
