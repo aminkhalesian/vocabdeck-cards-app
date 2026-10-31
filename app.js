@@ -13,6 +13,7 @@
   const h = (tag, attrs, ...kids) => {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
+      if (k.startsWith('aria-') && typeof v === 'boolean') { el.setAttribute(k, String(v)); continue; }
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
       else if (k === 'html') el.innerHTML = v;
@@ -37,7 +38,7 @@
   };
 
   /* ---------- progress (localStorage) ---------- */
-  const defaults = () => ({ v: 1, st: {}, deck: null, hist: [], quiz: { n: 0, ok: 0 }, prefs: { level: 'B1', size: 24, types: ['noun', 'verb'], order: 'freq' } });
+  const defaults = () => ({ v: 1, st: {}, deck: null, hist: [], quiz: { n: 0, ok: 0 }, prefs: { level: 'B1', size: 24, types: ['noun', 'verb', 'adjective', 'adverb', 'other'], order: 'freq' } });
   let P;
   try { P = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY_P) || '{}')); P.prefs = Object.assign(defaults().prefs, P.prefs); P.quiz = Object.assign({ n: 0, ok: 0 }, P.quiz); } catch (e) { P = defaults(); }
   const save = () => { try { localStorage.setItem(KEY_P, JSON.stringify(P)); } catch (e) { toast('Could not save progress: storage is full or blocked.'); } };
@@ -156,7 +157,13 @@
     const presetBox = h('div', { class: 'presets' }, [12, 24, 48].map((n) => h('button', { type: 'button', 'data-n': n, 'aria-pressed': pr.size === n, onclick: () => { pr.size = n; num.value = n; syncPresets(); save(); } }, String(n))));
     const syncPresets = () => presetBox.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.n === +num.value));
     num.addEventListener('input', () => { pr.size = Math.max(1, Math.min(200, +num.value || 1)); syncPresets(); save(); });
-    const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Word types' }, CATS.map(([id, label]) => h('button', { class: 'chip', type: 'button', 'aria-pressed': pr.types.includes(id), onclick: (e) => { const on = pr.types.includes(id); pr.types = on ? pr.types.filter((t) => t !== id) : [...pr.types, id]; e.currentTarget.setAttribute('aria-pressed', !on); save(); refresh(); } }, label)));
+    const ALLT = CATS.map(([c]) => c);
+    const chipDefs = [['all', 'All'], ...CATS];
+    const chipOn = (id) => (id === 'all' ? pr.types.length === ALLT.length : pr.types.length < ALLT.length && pr.types.includes(id));
+    const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Word types' }, chipDefs.map(([id, label]) => h('button', { class: 'chip', type: 'button', 'data-id': id, 'aria-pressed': chipOn(id), onclick: () => {
+      if (id === 'all' || pr.types.length === ALLT.length) pr.types = id === 'all' ? [...ALLT] : [id];
+      else { pr.types = pr.types.includes(id) ? pr.types.filter((t) => t !== id) : [...pr.types, id]; if (!pr.types.length) pr.types = [...ALLT]; }
+      chips.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', chipOn(x.dataset.id))); save(); refresh(); } }, label)));
     const ord = h('div', { class: 'seg', role: 'group', 'aria-label': 'Order' }, [['freq', 'Most common first'], ['rand', 'Random']].map(([id, label]) => h('button', { type: 'button', 'aria-pressed': pr.order === id, onclick: () => { pr.order = id; ord.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', ['freq', 'rand'][i] === id)); save(); } }, label)));
     go1.addEventListener('click', () => {
       const size = Math.max(1, Math.min(200, +num.value || 24)); let list = pool(pr.level, pr.types);
@@ -209,7 +216,7 @@
     const actions = h('div', { class: 'actions' },
       h('button', { class: 'round r', type: 'button', 'aria-label': 'Not known, review later', onclick: () => fling(-1) }, svg(ICON.cross)),
       h('button', { class: 'round k', type: 'button', 'aria-label': 'Known', onclick: () => fling(1) }, svg(ICON.check)));
-    main.replaceChildren(sbar, stage, h('div', {}, actions, h('p', { class: 'hintline' }, 'Tap to flip · swipe left = review · swipe right = known')));
+    main.replaceChildren(sbar, stage, h('div', {}, actions, h('p', { class: 'hintline' }, 'Tap to flip · swipe left = review · swipe right = known'), s.mode === 'deck' ? h('p', { class: 'hintline' }, `Deck: ${P.deck.level} · ${P.deck.types.length >= CATS.length ? 'all types' : P.deck.types.map((t) => (CATS.find((c) => c[0] === t) || [0, t])[1]).join(', ')}`) : ''));
     s.flipped = false;
 
     /* gestures */
